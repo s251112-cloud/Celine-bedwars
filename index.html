@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Mini BedWars</title>
+  <style>
+    body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; }
+    #crosshair {
+      position: absolute; top: 50%; left: 50%;
+      width: 10px; height: 10px;
+      color: white; font-size: 20px;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+    #ui {
+      position: absolute; top: 10px; left: 10px;
+      color: white; background: rgba(0,0,0,0.6);
+      padding: 12px; border-radius: 8px;
+    }
+    #instructions {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      color: white; background: rgba(0,0,0,0.8);
+      padding: 20px; border-radius: 10px; text-align: center;
+      cursor: pointer;
+    }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+  <div id="crosshair">+</div>
+  <div id="ui">
+    <h2>🛏️ Mini BedWars</h2>
+    <p>Target: Destroy the Red Bed!</p>
+    <p id="status">Bed Status: <span style="color: #ff4d4d; font-weight: bold;">INTACT</span></p>
+  </div>
+
+  <div id="instructions">
+    <h1>Click to Play</h1>
+    <p>W, A, S, D — Move | SPACE — Jump</p>
+    <p>MOUSE — Look Around | LEFT CLICK — Break Bed</p>
+  </div>
+
+  <script>
+    // --- 1. Scene Setup ---
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87ceeb); // Sky blue
+    scene.fog = new THREE.Fog(0x87ceeb, 10, 50);
+
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // --- 2. Lighting ---
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambientLight);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    dirLight.position.set(20, 40, 20);
+    scene.add(dirLight);
+
+    // --- 3. Build Island & Objects ---
+    // Island
+    const islandGeo = new THREE.BoxGeometry(12, 2, 12);
+    const islandMat = new THREE.MeshLambertMaterial({ color: 0x557a2b });
+    const island = new THREE.Mesh(islandGeo, islandMat);
+    island.position.y = -1;
+    scene.add(island);
+
+    // Red Bed
+    const bedGeo = new THREE.BoxGeometry(1.5, 0.6, 2.5);
+    const bedMat = new THREE.MeshLambertMaterial({ color: 0xcc0000 });
+    const bed = new THREE.Mesh(bedGeo, bedMat);
+    bed.position.set(0, 0.3, -2);
+    scene.add(bed);
+
+    // Generator (Iron/Gold)
+    const genGeo = new THREE.BoxGeometry(1, 1.2, 1);
+    const genMat = new THREE.MeshLambertMaterial({ color: 0x777777 });
+    const gen = new THREE.Mesh(genGeo, genMat);
+    gen.position.set(-4, 0.6, 4);
+    scene.add(gen);
+
+    // --- 4. Controls & Movement ---
+    let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false, canJump = false;
+    let velocity = new THREE.Vector3(), direction = new THREE.Vector3();
+    let isBedDestroyed = false;
+
+    const instructions = document.getElementById('instructions');
+    
+    instructions.addEventListener('click', () => {
+      document.body.requestPointerLock();
+    });
+
+    document.addEventListener('pointerlockchange', () => {
+      if (document.pointerLockElement === document.body) {
+        instructions.style.display = 'none';
+      } else {
+        instructions.style.display = 'block';
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.code === 'KeyW') moveForward = true;
+      if (e.code === 'KeyS') moveBackward = true;
+      if (e.code === 'KeyA') moveLeft = true;
+      if (e.code === 'KeyD') moveRight = true;
+      if (e.code === 'Space' && canJump) { velocity.y += 8; canJump = false; }
+    });
+
+    document.addEventListener('keyup', (e) => {
+      if (e.code === 'KeyW') moveForward = false;
+      if (e.code === 'KeyS') moveBackward = false;
+      if (e.code === 'KeyA') moveLeft = false;
+      if (e.code === 'KeyD') moveRight = false;
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (document.pointerLockElement === document.body) {
+        camera.rotation.y -= e.movementX * 0.002;
+        camera.rotation.x -= e.movementY * 0.002;
+        camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x));
+      }
+    });
+
+    // Interaction (Break Bed)
+    const raycaster = new THREE.Raycaster();
+    document.addEventListener('mousedown', () => {
+      if (document.pointerLockElement === document.body && !isBedDestroyed) {
+        raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+        const intersects = raycaster.intersectObject(bed);
+        if (intersects.length > 0 && intersects[0].distance < 5) {
+          scene.remove(bed);
+          isBedDestroyed = true;
+          document.getElementById('status').innerHTML = '<span style="color: #4dff4d; font-weight: bold;">DESTROYED! 🎉</span>';
+        }
+      }
+    });
+
+    // Position player
+    camera.position.set(0, 1.6, 3);
+    camera.rotation.order = 'YXZ';
+
+    // --- 5. Game Loop ---
+    let prevTime = performance.now();
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const time = performance.now();
+      const delta = (time - prevTime) / 1000;
+
+      velocity.x -= velocity.x * 10.0 * delta;
+      velocity.z -= velocity.z * 10.0 * delta;
+      velocity.y -= 9.8 * 2.0 * delta; // Gravity
+
+      direction.z = Number(moveForward) - Number(moveBackward);
+      direction.x = Number(moveRight) - Number(moveLeft);
+      direction.normalize();
+
+      if (moveForward || moveBackward) velocity.z -= direction.z * 40.0 * delta;
+      if (moveLeft || moveRight) velocity.x -= direction.x * 40.0 * delta;
+
+      camera.translateX(-velocity.x * delta);
+      camera.translateZ(velocity.z * delta);
+      camera.position.y += velocity.y * delta;
+
+      // Simple Floor Collision
+      if (camera.position.y < 1.6) {
+        velocity.y = 0;
+        camera.position.y = 1.6;
+        canJump = true;
+      }
+
+      prevTime = time;
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // Window Resize Handler
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
