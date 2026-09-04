@@ -3,27 +3,48 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>3D Mini BedWars</title>
+  <title>Hypixel BedWars 3D (Java Edition Style)</title>
   <style>
-    body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; }
+    body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Arial, sans-serif; user-select: none; }
     #crosshair {
       position: absolute; top: 50%; left: 50%;
-      width: 10px; height: 10px;
-      color: white; font-size: 20px;
-      transform: translate(-50%, -50%);
-      pointer-events: none;
+      width: 14px; height: 14px; color: rgba(255,255,255,0.8);
+      font-size: 22px; transform: translate(-50%, -50%);
+      pointer-events: none; text-align: center; line-height: 14px;
     }
-    #ui {
-      position: absolute; top: 10px; left: 10px;
-      color: white; background: rgba(0,0,0,0.6);
-      padding: 12px; border-radius: 8px;
+    #hud {
+      position: absolute; top: 15px; left: 15px;
+      color: white; background: rgba(0, 0, 0, 0.6);
+      padding: 15px 20px; border-radius: 8px; border: 2px solid #333;
     }
+    #hud h2 { margin: 0 0 8px 0; color: #ffaa00; text-shadow: 2px 2px #000; }
+    .status-item { margin: 4px 0; font-weight: bold; }
+    #hotbar {
+      position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 8px; background: rgba(0,0,0,0.5); padding: 6px; border-radius: 6px;
+    }
+    .slot {
+      width: 48px; height: 48px; border: 3px solid #555; background: #222;
+      color: white; display: flex; align-items: center; justify-content: center;
+      font-weight: bold; font-size: 12px; border-radius: 4px;
+    }
+    .slot.active { border-color: #ffaa00; background: #444; }
+    #game-over-screen {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.85); display: none; flex-direction: column;
+      align-items: center; justify-content: center; color: white; z-index: 10;
+    }
+    #game-over-screen h1 { font-size: 3rem; margin-bottom: 10px; text-shadow: 3px 3px #ff0000; }
+    #play-again-btn {
+      margin-top: 20px; padding: 15px 30px; font-size: 1.2rem; font-weight: bold;
+      background: #55ff55; color: black; border: none; border-radius: 8px;
+      cursor: pointer; transition: 0.2s;
+    }
+    #play-again-btn:hover { background: #00aa00; color: white; transform: scale(1.05); }
     #instructions {
-      position: absolute; top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      color: white; background: rgba(0,0,0,0.8);
-      padding: 20px; border-radius: 10px; text-align: center;
-      cursor: pointer;
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.8); display: flex; flex-direction: column;
+      align-items: center; justify-content: center; color: white; cursor: pointer; z-index: 9;
     }
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -31,154 +52,337 @@
 <body>
 
   <div id="crosshair">+</div>
-  <div id="ui">
-    <h2>🛏️ Mini BedWars</h2>
-    <p>Target: Destroy the Red Bed!</p>
-    <p id="status">Bed Status: <span style="color: #ff4d4d; font-weight: bold;">INTACT</span></p>
+  <div id="hud">
+    <h2>HYPIXEL BEDWARS</h2>
+    <div class="status-item">Your Bed: <span id="my-bed" style="color:#55ff55;">HEALTHY</span></div>
+    <div class="status-item">Red Bed: <span id="red-bed" style="color:#ff5555;">INTACT</span></div>
+    <div class="status-item">Iron: <span id="iron-count" style="color:#aaaaaa;">0</span> | Gold: <span id="gold-count" style="color:#ffaa00;">0</span></div>
+  </div>
+
+  <div id="hotbar">
+    <div class="slot active" id="slot-1">1: Sword</div>
+    <div class="slot" id="slot-2">2: Blocks (<span id="block-count">16</span>)</div>
   </div>
 
   <div id="instructions">
-    <h1>Click to Play</h1>
-    <p>W, A, S, D — Move | SPACE — Jump</p>
-    <p>MOUSE — Look Around | LEFT CLICK — Break Bed</p>
+    <h1>CLICK TO START HYPIXEL BEDWARS</h1>
+    <p>WASD — Move | SPACE — Jump | MOUSE — Look Around</p>
+    <p>LEFT CLICK — Attack / Break Bed | RIGHT CLICK — Place Block</p>
+    <p>Press 'E' near the Shop NPC to buy blocks!</p>
+  </div>
+
+  <div id="game-over-screen">
+    <h1 id="victory-title">VICTORY!</h1>
+    <p id="victory-sub">You destroyed the enemy bed and defeated Red Team!</p>
+    <button id="play-again-btn" onclick="resetGame()">PLAY AGAIN</button>
   </div>
 
   <script>
-    // --- 1. Scene Setup ---
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x87ceeb); // Sky blue
-    scene.fog = new THREE.Fog(0x87ceeb, 10, 50);
+    // --- Game Variables & Setup ---
+    let scene, camera, renderer;
+    let playerHealth = 100, iron = 0, gold = 0, blocksLeft = 16, currentSlot = 1;
+    let myBedIntact = true, redBedIntact = true, enemyAlive = true;
+    let isGameOver = false;
 
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
+    // Movement
+    let moveF = false, moveB = false, moveL = false, moveR = false, canJump = false;
+    let velocity = new THREE.Vector3();
 
-    // --- 2. Lighting ---
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-    scene.add(ambientLight);
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    dirLight.position.set(20, 40, 20);
-    scene.add(dirLight);
+    // Game Objects
+    let playerBed, enemyBed, enemyNPC, shopNPC;
+    const placedBlocks = [];
 
-    // --- 3. Build Island & Objects ---
-    // Island
-    const islandGeo = new THREE.BoxGeometry(12, 2, 12);
-    const islandMat = new THREE.MeshLambertMaterial({ color: 0x557a2b });
-    const island = new THREE.Mesh(islandGeo, islandMat);
-    island.position.y = -1;
-    scene.add(island);
+    function init() {
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x7ec0ee); // Sky blue
+      scene.fog = new THREE.FogExp2(0x7ec0ee, 0.015);
 
-    // Red Bed
-    const bedGeo = new THREE.BoxGeometry(1.5, 0.6, 2.5);
-    const bedMat = new THREE.MeshLambertMaterial({ color: 0xcc0000 });
-    const bed = new THREE.Mesh(bedGeo, bedMat);
-    bed.position.set(0, 0.3, -2);
-    scene.add(bed);
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.rotation.order = 'YXZ';
 
-    // Generator (Iron/Gold)
-    const genGeo = new THREE.BoxGeometry(1, 1.2, 1);
-    const genMat = new THREE.MeshLambertMaterial({ color: 0x777777 });
-    const gen = new THREE.Mesh(genGeo, genMat);
-    gen.position.set(-4, 0.6, 4);
-    scene.add(gen);
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
 
-    // --- 4. Controls & Movement ---
-    let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false, canJump = false;
-    let velocity = new THREE.Vector3(), direction = new THREE.Vector3();
-    let isBedDestroyed = false;
+      // Lighting
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+      scene.add(ambientLight);
+      const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+      sun.position.set(20, 50, 20);
+      scene.add(sun);
 
-    const instructions = document.getElementById('instructions');
-    
-    instructions.addEventListener('click', () => {
-      document.body.requestPointerLock();
-    });
+      buildIslands();
+      setupEventListeners();
+      resetGameState();
+      animate();
+    }
 
-    document.addEventListener('pointerlockchange', () => {
-      if (document.pointerLockElement === document.body) {
-        instructions.style.display = 'none';
-      } else {
-        instructions.style.display = 'block';
-      }
-    });
+    // --- Build Map (Player Island & Red Enemy Island) ---
+    function buildIslands() {
+      // Player Island (Blue)
+      createIsland(0, -1, 0, 0x0055ff);
+      playerBed = createBed(0, 0.3, -4, 0x0055ff);
 
-    document.addEventListener('keydown', (e) => {
-      if (e.code === 'KeyW') moveForward = true;
-      if (e.code === 'KeyS') moveBackward = true;
-      if (e.code === 'KeyA') moveLeft = true;
-      if (e.code === 'KeyD') moveRight = true;
-      if (e.code === 'Space' && canJump) { velocity.y += 8; canJump = false; }
-    });
+      // Enemy Island (Red)
+      createIsland(0, -1, -35, 0xff2222);
+      enemyBed = createBed(0, 0.3, -39, 0xff2222);
 
-    document.addEventListener('keyup', (e) => {
-      if (e.code === 'KeyW') moveForward = false;
-      if (e.code === 'KeyS') moveBackward = false;
-      if (e.code === 'KeyA') moveLeft = false;
-      if (e.code === 'KeyD') moveRight = false;
-    });
+      // Enemy NPC
+      const enemyGeo = new THREE.BoxGeometry(0.8, 1.8, 0.8);
+      const enemyMat = new THREE.MeshLambertMaterial({ color: 0xff0000 });
+      enemyNPC = new THREE.Mesh(enemyGeo, enemyMat);
+      enemyNPC.position.set(0, 0.9, -35);
+      scene.add(enemyNPC);
+    }
 
-    document.addEventListener('mousemove', (e) => {
-      if (document.pointerLockElement === document.body) {
-        camera.rotation.y -= e.movementX * 0.002;
-        camera.rotation.x -= e.movementY * 0.002;
-        camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x));
-      }
-    });
+    function createIsland(x, y, z, color) {
+      const geo = new THREE.BoxGeometry(14, 2, 14);
+      const mat = new THREE.MeshLambertMaterial({ color: color });
+      const island = new THREE.Mesh(geo, mat);
+      island.position.set(x, y, z);
+      scene.add(island);
+    }
 
-    // Interaction (Break Bed)
-    const raycaster = new THREE.Raycaster();
-    document.addEventListener('mousedown', () => {
-      if (document.pointerLockElement === document.body && !isBedDestroyed) {
-        raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-        const intersects = raycaster.intersectObject(bed);
-        if (intersects.length > 0 && intersects[0].distance < 5) {
-          scene.remove(bed);
-          isBedDestroyed = true;
-          document.getElementById('status').innerHTML = '<span style="color: #4dff4d; font-weight: bold;">DESTROYED! 🎉</span>';
+    function createBed(x, y, z, color) {
+      const geo = new THREE.BoxGeometry(1.6, 0.6, 2.6);
+      const mat = new THREE.MeshLambertMaterial({ color: color });
+      const bed = new THREE.Mesh(geo, mat);
+      bed.position.set(x, y, z);
+      scene.add(bed);
+      return bed;
+    }
+
+    // --- Controls & Logic ---
+    function setupEventListeners() {
+      const inst = document.getElementById('instructions');
+      inst.addEventListener('click', () => document.body.requestPointerLock());
+
+      document.addEventListener('pointerlockchange', () => {
+        inst.style.display = document.pointerLockElement === document.body ? 'none' : 'flex';
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (e.code === 'KeyW') moveF = true;
+        if (e.code === 'KeyS') moveB = true;
+        if (e.code === 'KeyA') moveL = true;
+        if (e.code === 'KeyD') moveR = true;
+        if (e.code === 'Space' && canJump) { velocity.y += 9; canJump = false; }
+        if (e.code === 'Digit1') setSlot(1);
+        if (e.code === 'Digit2') setSlot(2);
+        if (e.code === 'KeyE') buyBlocks();
+      });
+
+      document.addEventListener('keyup', (e) => {
+        if (e.code === 'KeyW') moveF = false;
+        if (e.code === 'KeyS') moveB = false;
+        if (e.code === 'KeyA') moveL = false;
+        if (e.code === 'KeyD') moveR = false;
+      });
+
+      document.addEventListener('mousemove', (e) => {
+        if (document.pointerLockElement === document.body) {
+          camera.rotation.y -= e.movementX * 0.0025;
+          camera.rotation.x -= e.movementY * 0.0025;
+          camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x));
         }
+      });
+
+      // Combat / Breaking / Placing
+      document.addEventListener('mousedown', (e) => {
+        if (document.pointerLockElement !== document.body || isGameOver) return;
+
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+
+        if (e.button === 0) { // Left Click: Attack / Break Bed
+          // Attack Red Bed
+          if (redBedIntact) {
+            const hitBed = raycaster.intersectObject(enemyBed);
+            if (hitBed.length > 0 && hitBed[0].distance < 4.5) {
+              scene.remove(enemyBed);
+              redBedIntact = false;
+              document.getElementById('red-bed').innerHTML = '<b style="color:#aaaaaa;">DESTROYED</b>';
+            }
+          }
+          // Attack Enemy NPC
+          if (enemyAlive) {
+            const hitEnemy = raycaster.intersectObject(enemyNPC);
+            if (hitEnemy.length > 0 && hitEnemy[0].distance < 4) {
+              defeatEnemy();
+            }
+          }
+        } else if (e.button === 2) { // Right Click: Place Block
+          if (currentSlot === 2 && blocksLeft > 0) {
+            placeBlock(raycaster);
+          }
+        }
+      });
+    }
+
+    function setSlot(slot) {
+      currentSlot = slot;
+      document.getElementById('slot-1').classList.toggle('active', slot === 1);
+      document.getElementById('slot-2').classList.toggle('active', slot === 2);
+    }
+
+    function placeBlock(raycaster) {
+      const targetPos = new THREE.Vector3();
+      camera.getWorldDirection(targetPos);
+      targetPos.multiplyScalar(3).add(camera.position);
+
+      const blockGeo = new THREE.BoxGeometry(1, 1, 1);
+      const blockMat = new THREE.MeshLambertMaterial({ color: 0xd2b48c }); // Wool block
+      const block = new THREE.Mesh(blockGeo, blockMat);
+      
+      block.position.set(
+        Math.round(targetPos.x),
+        Math.round(targetPos.y),
+        Math.round(targetPos.z)
+      );
+
+      scene.add(block);
+      placedBlocks.push(block);
+      blocksLeft--;
+      document.getElementById('block-count').textContent = blocksLeft;
+    }
+
+    function buyBlocks() {
+      if (iron >= 4) {
+        iron -= 4;
+        blocksLeft += 16;
+        document.getElementById('block-count').textContent = blocksLeft;
+        document.getElementById('iron-count').textContent = iron;
       }
-    });
+    }
 
-    // Position player
-    camera.position.set(0, 1.6, 3);
-    camera.rotation.order = 'YXZ';
+    function defeatEnemy() {
+      scene.remove(enemyNPC);
+      enemyAlive = false;
+      if (!redBedIntact) {
+        triggerGameOver(true);
+      } else {
+        // Respawn Red Enemy in 3 seconds if bed is alive
+        setTimeout(() => {
+          if (redBedIntact) {
+            scene.add(enemyNPC);
+            enemyNPC.position.set(0, 0.9, -35);
+            enemyAlive = true;
+          }
+        }, 3000);
+      }
+    }
 
-    // --- 5. Game Loop ---
-    let prevTime = performance.now();
+    function triggerGameOver(isVictory) {
+      isGameOver = true;
+      document.exitPointerLock();
+      const screen = document.getElementById('game-over-screen');
+      const title = document.getElementById('victory-title');
+      const sub = document.getElementById('victory-sub');
+
+      if (isVictory) {
+        title.textContent = "VICTORY!";
+        title.style.color = "#55ff55";
+        sub.textContent = "You destroyed the Red Bed and eliminated Red Team!";
+      } else {
+        title.textContent = "GAME OVER!";
+        title.style.color = "#ff5555";
+        sub.textContent = "You fell into the void or your bed was destroyed!";
+      }
+      screen.style.display = 'flex';
+    }
+
+    function resetGame() {
+      document.getElementById('game-over-screen').style.display = 'none';
+      
+      // Clear placed blocks
+      placedBlocks.forEach(b => scene.remove(b));
+      placedBlocks.length = 0;
+
+      // Restore Beds & Enemy
+      if (!redBedIntact) scene.add(enemyBed);
+      if (!enemyAlive) scene.add(enemyNPC);
+      
+      redBedIntact = true;
+      enemyAlive = true;
+      isGameOver = false;
+
+      document.getElementById('red-bed').innerHTML = '<b style="color:#ff5555;">INTACT</b>';
+      
+      resetGameState();
+      document.body.requestPointerLock();
+    }
+
+    function resetGameState() {
+      iron = 0; gold = 0; blocksLeft = 16;
+      document.getElementById('iron-count').textContent = iron;
+      document.getElementById('block-count').textContent = blocksLeft;
+      camera.position.set(0, 1.8, 2);
+      velocity.set(0, 0, 0);
+    }
+
+    // --- Generator & Enemy AI Loop ---
+    setInterval(() => {
+      if (!isGameOver) {
+        iron += 1;
+        document.getElementById('iron-count').textContent = iron;
+      }
+    }, 1500);
+
+    // --- Main Game Loop ---
+    let lastTime = performance.now();
     function animate() {
       requestAnimationFrame(animate);
 
       const time = performance.now();
-      const delta = (time - prevTime) / 1000;
+      const delta = (time - lastTime) / 1000;
 
-      velocity.x -= velocity.x * 10.0 * delta;
-      velocity.z -= velocity.z * 10.0 * delta;
-      velocity.y -= 9.8 * 2.0 * delta; // Gravity
+      if (!isGameOver) {
+        // Player Physics
+        velocity.x -= velocity.x * 10.0 * delta;
+        velocity.z -= velocity.z * 10.0 * delta;
+        velocity.y -= 25.0 * delta; // Gravity
 
-      direction.z = Number(moveForward) - Number(moveBackward);
-      direction.x = Number(moveRight) - Number(moveLeft);
-      direction.normalize();
+        const dir = new THREE.Vector3(Number(moveR) - Number(moveL), 0, Number(moveB) - Number(moveF)).normalize();
+        if (moveF || moveB) velocity.z += dir.z * 50.0 * delta;
+        if (moveL || moveR) velocity.x += dir.x * 50.0 * delta;
 
-      if (moveForward || moveBackward) velocity.z -= direction.z * 40.0 * delta;
-      if (moveLeft || moveRight) velocity.x -= direction.x * 40.0 * delta;
+        camera.translateX(velocity.x * delta);
+        camera.translateZ(velocity.z * delta);
+        camera.position.y += velocity.y * delta;
 
-      camera.translateX(-velocity.x * delta);
-      camera.translateZ(velocity.z * delta);
-      camera.position.y += velocity.y * delta;
+        // Ground Collision (Player Island)
+        if (camera.position.y < 1.8 && Math.abs(camera.position.x) < 7 && Math.abs(camera.position.z) < 7) {
+          velocity.y = 0; camera.position.y = 1.8; canJump = true;
+        }
+        // Ground Collision (Enemy Island)
+        else if (camera.position.y < 1.8 && Math.abs(camera.position.x) < 7 && Math.abs(camera.position.z + 35) < 7) {
+          velocity.y = 0; camera.position.y = 1.8; canJump = true;
+        }
 
-      // Simple Floor Collision
-      if (camera.position.y < 1.6) {
-        velocity.y = 0;
-        camera.position.y = 1.6;
-        canJump = true;
+        // Void Death Check
+        if (camera.position.y < -10) {
+          triggerGameOver(false);
+        }
+
+        // Enemy AI Movement (Chases Player when nearby)
+        if (enemyAlive) {
+          const distToPlayer = enemyNPC.position.distanceTo(camera.position);
+          if (distToPlayer < 12) {
+            enemyNPC.lookAt(camera.position.x, enemyNPC.position.y, camera.position.z);
+            enemyNPC.translateZ(3.0 * delta);
+
+            if (distToPlayer < 1.8) {
+              triggerGameOver(false); // Enemy killed you!
+            }
+          }
+        }
       }
 
-      prevTime = time;
+      lastTime = time;
       renderer.render(scene, camera);
     }
-    animate();
 
-    // Window Resize Handler
+    window.onload = init;
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
